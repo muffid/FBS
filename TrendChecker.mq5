@@ -25,7 +25,9 @@ double arrEmaTrends[4];
 bool initTicking = true;
 string trendNow = "";
 bool pipValidity;
-int counter = 0;
+
+int totalPosition = 0;
+
 
 
 int OnInit(){
@@ -60,19 +62,26 @@ void OnTick(){
   ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
   trendNow =  whatTrends(arrEmaTrends);
   pipValidity = isPipGood(ema21Values[1],ema55Values[1]);
+
   if(
       trendNow != "Unconfirm" 
       && isOhlcNotCrossingEma(openPrice,highPrice,lowPrice,ema21Values[1],trendNow)
       &&  pipValidity == true 
      ){
       if( trendNow == "Bullish" && bid <= NormalizeDouble(ema21Values[1],5)){
-
-         Print("Valid ",trendNow);
-         BuyInstant("EURUSD", 0.1, bid);  
+   
+        if(isNoPosition(Symbol())){
+          double pipDistance = getDistance(SymbolInfoDouble(Symbol(),SYMBOL_ASK),ema55Values[1]);
+          double tpPrice = getTpPrice("long",SymbolInfoDouble(Symbol(),SYMBOL_ASK),pipDistance);
+          placeInstantOrder("long",ema55Values[1],tpPrice);
+        }
       }
       if( trendNow == "Bearish" && bid >= NormalizeDouble(ema21Values[1],5)){
-    
-         Print("Valid ",trendNow);
+         if(isNoPosition(Symbol())){
+          double pipDistance = getDistance(SymbolInfoDouble(Symbol(),SYMBOL_ASK),ema55Values[1]);
+          double tpPrice = getTpPrice("short",SymbolInfoDouble(Symbol(),SYMBOL_ASK),pipDistance);
+          placeInstantOrder("short",ema55Values[1],tpPrice);
+        }
       }
   }else{ 
     // Print("Inv");
@@ -129,31 +138,84 @@ bool isOhlcNotCrossingEma(double openP, double highP, double lowP, double ema21,
   return false;
 }
 
-void makeTransaction(string trend){
-  Print("Order Created ",trend);
+double getDistance(double openPrice, double ema55Val){
+  double point_size = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+  double pip_diff = (openPrice - ema55Val) / point_size;
+
+  return MathAbs(pip_diff); // Return the absolute pip difference
 }
 
-// Function to place an instant execution buy order
+double getTpPrice(string position, double open_price, int pip_distance){
+   // Mendapatkan nilai 1 pip dari simbol
+   double point_size = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   int pip_multiplier = (int)(1 / point_size / 10); // Menentukan faktor pengali pip
 
-void BuyInstant(string symbol, double volume, double price) {
+   // Menghitung jarak TP dalam nilai harga
+   double tp_distance = pip_distance * point_size * pip_multiplier;
 
+   // Menentukan harga TP berdasarkan jenis posisi
+   double tp_price;
+   if (position == "long")
+   {
+      tp_price = open_price + tp_distance;
+   }
+   else
+   {
+      tp_price = open_price - tp_distance;
+   }
 
+   return tp_price;
+}
+
+bool placeInstantOrder(string posisi,double slPrice, double tpPrice) {
   MqlTradeRequest request={};
   MqlTradeResult  result={};
 
-   request.action   =TRADE_ACTION_DEAL;                     // type of trade operation
-   request.symbol   =Symbol();                              // symbol
-   request.volume   =0.1;                                   // volume of 0.1 lot
-   request.type     =ORDER_TYPE_BUY;                        // order type
-   request.price    =SymbolInfoDouble(Symbol(),SYMBOL_ASK); // price for opening
-   request.deviation=5;                                     // allowed deviation from the price
-   request.magic    =EXPERT_MAGIC;                          // MagicNumber of the order
+  if(posisi == "long"){
+    request.type     =ORDER_TYPE_BUY;                       
+    request.price    =SymbolInfoDouble(Symbol(),SYMBOL_ASK);
+  }else{
+    request.type     =ORDER_TYPE_SELL;                       
+    request.price    =SymbolInfoDouble(Symbol(),SYMBOL_BID);
+  }
+  request.action   =TRADE_ACTION_DEAL;                     // type of trade operation
+  request.symbol   =Symbol();                              // symbol
+  request.volume   =0.1;                                   // volume of 0.1 lot
+  request.sl       =slPrice;
+  request.tp       =tpPrice;
+  request.deviation=5;                                     // allowed deviation from the price
+  request.magic    =EXPERT_MAGIC;                          // MagicNumber of the order
 
-   if(!OrderSend(request,result))
-      PrintFormat("OrderSend error %d",GetLastError());     // if unable to send the request, output the error code
+  if(!OrderSend(request,result)){
 
-   PrintFormat("retcode=%u  deal=%I64u  order=%I64u",result.retcode,result.deal,result.order);
-
-
+      PrintFormat("OrderSend error %d",GetLastError()); 
+       PrintFormat("retcode=%u  deal=%I64u  order=%I64u",result.retcode,result.deal,result.order);
+      return false;
+  }
+  return true;
 }
+
+bool isNoPosition(string pair){
+   int total=PositionsTotal(); 
+   for(int i=0; i<total; i++) 
+     { 
+      //--- get position symbol by i loop index 
+      ResetLastError(); 
+      string symbol=PositionGetSymbol(i); 
+       
+      //--- if the position symbol is successfully received, then the position at the i index becomes selected automatically 
+      //--- and we can obtain its properties using PositionGetDouble, PositionGetInteger and PositionGetString 
+      if(symbol == pair ) 
+        { 
+          return false;
+        //  ENUM_POSITION_TYPE type=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE); 
+        //  PrintFormat("Position symbol at index %d: %s, position type: %s", i, symbol, StringSubstr(EnumToString(type), 14)); 
+
+        }
+       
+  
+  }
+   return true;
+}
+
 
